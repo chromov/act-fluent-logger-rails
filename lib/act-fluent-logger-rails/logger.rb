@@ -29,6 +29,15 @@ module ActFluentLoggerRails
     ensure
       flush
     end
+
+    def push_tags(*args)
+      tags = args if args.count > 1
+      tags = [args[0]].flatten if args.count == 1
+      tags ||= []
+      @tag = tags.select(&:present?).join('.')
+      self
+    end
+
   end
 
   class FluentLogger < ActiveSupport::Logger
@@ -37,8 +46,8 @@ module ActFluentLoggerRails
       port    = options[:port]
       host    = options[:host]
       @messages_type = (options[:messages_type] || :array).to_sym
-      @tag = options[:tag]
-      @fluent_logger = ::Fluent::Logger::FluentLogger.new(nil, host: host, port: port)
+      @tag = ''
+      @fluent_logger = ::Fluent::Logger::FluentLogger.new(options[:tag], host: host, port: port)
       @severity = 0
       @messages = []
       @log_tags = log_tags
@@ -49,8 +58,20 @@ module ActFluentLoggerRails
       return true if severity < level
       message = (block_given? ? block.call : progname) if message.blank?
       return true if message.blank?
-      add_message(severity, message)
+      if message.is_a? Hash
+        direct_post(severity, message)
+      else
+        add_message(severity, message)
+      end
       true
+    end
+
+    def direct_post(severity, data)
+      return if !data.is_a?(Hash) || data.empty?
+      @severity = severity if @severity < severity
+      data = {level: format_severity(@severity)}.merge(data)
+      @fluent_logger.post(@tag, data)
+      @severity = 0
     end
 
     def add_message(severity, message)
