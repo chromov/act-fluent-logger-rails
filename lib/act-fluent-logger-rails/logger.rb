@@ -24,9 +24,15 @@ module ActFluentLoggerRails
     end
 
     def tagged(*tags)
-      @request = tags[0][0]
+      default_log = tags[0][0].is_a?(ActionDispatch::Request)
+      if default_log
+        @request = tags[0][0]
+      else
+        push_tags([tags].flatten.first)
+      end
       yield self
     ensure
+      pop_tags unless default_log
       flush
     end
 
@@ -34,8 +40,12 @@ module ActFluentLoggerRails
       tags = args if args.count > 1
       tags = [args[0]].flatten if args.count == 1
       tags ||= []
-      @tag = tags.select(&:present?).join('.')
-      self
+      @tags += tags.select(&:present?)
+      tags
+    end
+
+    def pop_tags
+      @tags.pop || []
     end
 
   end
@@ -46,12 +56,18 @@ module ActFluentLoggerRails
       port    = options[:port]
       host    = options[:host]
       @messages_type = (options[:messages_type] || :array).to_sym
-      @tag = ''
-      @fluent_logger = ::Fluent::Logger::FluentLogger.new(options[:tag], host: host, port: port)
+      @tags = []
+      @base_tag = options[:tag]
+      @fluent_logger = ::Fluent::Logger::FluentLogger.new(nil, host: host, port: port)
       @severity = 0
       @messages = []
       @log_tags = log_tags
       @map = {}
+      @formatter = Proc.new {}
+    end
+
+    def current_tag
+      ([@base_tag] + @tags).join('.')
     end
 
     def add(severity, message = nil, progname = nil, &block)
@@ -59,7 +75,7 @@ module ActFluentLoggerRails
       message = (block_given? ? block.call : progname) if message.blank?
       return true if message.blank?
       if message.is_a? Hash
-        direct_post(severity, message)
+        direct_post(severity, {:log => message})
       else
         add_message(severity, message)
       end
@@ -70,7 +86,7 @@ module ActFluentLoggerRails
       return if !data.is_a?(Hash) || data.empty?
       @severity = severity if @severity < severity
       data = {level: format_severity(@severity)}.merge(data)
-      @fluent_logger.post(@tag, data)
+      @fluent_logger.post(current_tag, data)
       @severity = 0
     end
 
@@ -94,10 +110,12 @@ module ActFluentLoggerRails
                  else
                    @messages
                  end
-      @map[:messages] = messages
       @map[:level] = format_severity(@severity)
+      @map[:time] = Time.now.to_s
+      @map[:log] = {messages: messages}
+      rq_i = {}
       @log_tags.each do |k, v|
-        @map[k] = case v
+        rq_i[k] = case v
                   when Proc
                     v.call(@request)
                   when Symbol
@@ -106,7 +124,8 @@ module ActFluentLoggerRails
                     v
                   end rescue :error
       end
-      @fluent_logger.post(@tag, @map)
+      @map[:log][:request_info] = rq_i
+      @fluent_logger.post(current_tag, @map)
       @severity = 0
       @messages.clear
       @map.clear
