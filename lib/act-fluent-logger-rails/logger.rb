@@ -25,27 +25,29 @@ module ActFluentLoggerRails
 
     def tagged(*tags)
       default_log = tags[0][0].is_a?(ActionDispatch::Request)
+      new_tags = []
       if default_log
         @request = tags[0][0]
       else
-        push_tags([tags].flatten.first)
+        new_tags = push_tags(*tags)
       end
       yield self
     ensure
-      pop_tags unless default_log
-      flush
+      pop_tags(new_tags.size)
     end
 
-    def push_tags(*args)
-      tags = args if args.count > 1
-      tags = [args[0]].flatten if args.count == 1
-      tags ||= []
-      @tags += tags.select(&:present?)
-      tags
+    def push_tags(*tags)
+      tags.flatten.reject(&:blank?).tap do |new_tags|
+        @tags.concat new_tags
+      end
     end
 
-    def pop_tags
-      @tags.pop || []
+    def pop_tags(size = 1)
+      @tags.pop size
+    end
+
+    def clear_tags!
+      @tags.clear
     end
 
   end
@@ -85,7 +87,7 @@ module ActFluentLoggerRails
     def direct_post(severity, data)
       return if !data.is_a?(Hash) || data.empty?
       @severity = severity if @severity < severity
-      data = {level: format_severity(@severity)}.merge(data)
+      data = {level: format_severity(@severity), tags: current_tag, time: Time.now.to_s}.merge(data)
       @fluent_logger.post(current_tag, data)
       @severity = 0
     end
@@ -110,7 +112,10 @@ module ActFluentLoggerRails
                  else
                    @messages
                  end
+
+      @tags.push('rails')
       @map[:level] = format_severity(@severity)
+      @map[:tags] = current_tag
       @map[:time] = Time.now.to_s
       @map[:log] = {messages: messages}
       rq_i = {}
@@ -127,6 +132,7 @@ module ActFluentLoggerRails
       @map[:log][:request_info] = rq_i
       @fluent_logger.post(current_tag, @map)
       @severity = 0
+      @tags.pop
       @messages.clear
       @map.clear
     end
