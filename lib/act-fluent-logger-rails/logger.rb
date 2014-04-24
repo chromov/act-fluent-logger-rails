@@ -50,6 +50,14 @@ module ActFluentLoggerRails
       @tags.clear
     end
 
+    def add_global_data(hsh)
+      @global_log_data.merge(hsh) if hsh.is_a?(Hash)
+    end
+
+    def set_global_data(hsh)
+      @global_log_data = hsh
+    end
+
   end
 
   class FluentLogger < ActiveSupport::Logger
@@ -66,6 +74,7 @@ module ActFluentLoggerRails
       @log_tags = log_tags
       @map = {}
       @formatter = Proc.new {}
+      @global_log_data = {}
     end
 
     def current_tag
@@ -77,7 +86,7 @@ module ActFluentLoggerRails
       message = (block_given? ? block.call : progname) if message.blank?
       return true if message.blank?
       if message.is_a? Hash
-        direct_post(severity, {:log => message})
+        direct_post(severity, message)
       else
         add_message(severity, message)
       end
@@ -87,7 +96,8 @@ module ActFluentLoggerRails
     def direct_post(severity, data)
       return if !data.is_a?(Hash) || data.empty?
       @severity = severity if @severity < severity
-      data = {level: format_severity(@severity), tags: current_tag, time: Time.now.to_s}.merge(data)
+      data = {:log => data.merge(@global_log_data)}
+      data = {level: format_severity(@severity), tags: current_tag.split('.'), time: Time.now.to_s}.merge(data)
       @fluent_logger.post(current_tag, data)
       @severity = 0
     end
@@ -115,9 +125,9 @@ module ActFluentLoggerRails
 
       @tags.push('rails')
       @map[:level] = format_severity(@severity)
-      @map[:tags] = current_tag
+      @map[:tags] = current_tag.split('.')
       @map[:time] = Time.now.to_s
-      @map[:log] = {messages: messages}
+      @map[:log] = {messages: messages}.merge(@global_log_data)
       rq_i = {}
       @log_tags.each do |k, v|
         rq_i[k] = case v
