@@ -8,7 +8,8 @@ module ActFluentLoggerRails
     def call(env)
       log = Rails.logger
       if log.respond_to?(:set_global_data)
-        log.set_global_data({request_uuid: SecureRandom.uuid})
+        request_uuid = env['request_uuid'] = SecureRandom.uuid
+        log.set_global_data({request_uuid: request_uuid})
       end
       @app.call(env)
     end
