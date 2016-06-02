@@ -80,7 +80,13 @@ module ActFluentLoggerRails
       return true if severity < level
       message = (block_given? ? block.call : progname) if message.blank?
       return true if message.blank?
-      add_message(severity, message)
+
+      if message.is_a? Hash
+        direct_post(severity, message)
+      else
+        add_message(severity, message)
+      end
+
       true
     end
 
@@ -115,6 +121,15 @@ module ActFluentLoggerRails
       @map[key] = value
     end
 
+    def direct_post(severity, data)
+      return if !data.is_a?(Hash) || data.empty?
+      @severity = severity if @severity < severity
+      data[@severity_key] = format_severity(@severity)
+      data.merge!(collect_log_tags)
+      @fluent_logger.post(@tag, data)
+      @severity = 0
+    end
+
     def flush
       return if @messages.empty?
       messages = if @messages_type == :string
@@ -124,20 +139,25 @@ module ActFluentLoggerRails
                  end
       @map[:messages] = messages
       @map[@severity_key] = format_severity(@severity)
-      @log_tags.each do |k, v|
-        @map[k] = case v
-                  when Proc
-                    v.call(@request)
-                  when Symbol
-                    @request.send(v)
-                  else
-                    v
-                  end rescue :error
-      end
+      @map.merge!(collect_log_tags)
       @fluent_logger.post(@tag, @map)
       @severity = 0
       @messages.clear
       @map.clear
+    end
+
+    def collect_log_tags
+      Hash[@log_tags.map do |k, v|
+        pv = case v
+             when Proc
+               v.call(@request)
+             when Symbol
+               @request.send(v)
+             else
+               v
+             end rescue :error
+        [k, pv]
+      end]
     end
 
     def close
