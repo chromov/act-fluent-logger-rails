@@ -53,14 +53,17 @@ module ActFluentLoggerRails
     end
 
     def tagged(*tags)
-      @request = tags[0][0]
-      yield self
+      new_l = self.dup
+      new_l.request = tags[0][0]
+      yield new_l
     ensure
       flush
     end
   end
 
   class FluentLogger < ActiveSupport::Logger
+    attr_writer :request
+
     def initialize(options, level, log_tags)
       self.level = level
       port    = options[:port]
