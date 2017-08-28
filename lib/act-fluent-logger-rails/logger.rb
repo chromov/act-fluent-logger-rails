@@ -53,16 +53,15 @@ module ActFluentLoggerRails
     end
 
     def tagged(*tags)
-      new_l = self.dup
-      new_l.request = tags[0][0]
-      yield new_l
+      self.request = tags[0][0]
+      yield self
     ensure
+      self.request = nil
       flush
     end
   end
 
   class FluentLogger < ActiveSupport::Logger
-    attr_writer :request
 
     def initialize(options, level, log_tags)
       self.level = level
@@ -77,6 +76,18 @@ module ActFluentLoggerRails
       @messages = []
       @log_tags = log_tags
       @map = {}
+    end
+
+    def request=(r)
+      Thread.current[thread_key] = r
+    end
+
+    def request
+      Thread.current[thread_key]
+    end
+
+    def thread_key
+      @thread_key ||= "fluent_logger_thread_key:#{object_id}".freeze
     end
 
     def add(severity, message = nil, progname = nil, &block)
@@ -153,9 +164,9 @@ module ActFluentLoggerRails
       Hash[@log_tags.map do |k, v|
         pv = case v
              when Proc
-               v.call(@request)
+               v.call(request)
              when Symbol
-               @request.send(v)
+               request.send(v)
              else
                v
              end rescue :error
